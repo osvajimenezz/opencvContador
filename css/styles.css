@@ -1,0 +1,13 @@
+body {
+  background: #f4f6f9;
+}
+
+.video-container {
+  position: relative;
+  display: inline-block;
+}
+
+#canvasOutput {
+  max-width: 100%;
+  border: 3px solid #dee2e6;
+}
