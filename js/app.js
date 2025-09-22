@@ -2,58 +2,71 @@ const videoElement = document.getElementById("videoInput");
 const canvasElement = document.getElementById("canvasOutput");
 const canvasCtx = canvasElement.getContext("2d");
 
-// Contadores
+// ===============================
+// Contadores y estados
+// ===============================
 let contadorOjos = 0, contadorBoca = 0, contadorCejas = 0;
+let ojosCerrados = false, bocaAbierta = false, cejasArriba = false;
 
-// Estados previos
-let ojosCerrados = false;
-let bocaAbierta = false;
-let cejasArriba = false;
+// Tiempos mínimos (ms) para evitar falsos positivos
+let ultimoParpadeo = 0, ultimoBoca = 0, ultimoCeja = 0;
+const MIN_TIEMPO = 300; // 300ms entre eventos
 
+// ===============================
+// Función de detección de gestos
+// ===============================
 function detectarGestos(landmarks) {
   if (!landmarks) return;
 
   // ===============================
-  // 👀 OJOS (usamos ojo izquierdo)
+  // 📏 Normalización
   // ===============================
-  let ojoSup = landmarks[159].y; // párpado superior
-  let ojoInf = landmarks[145].y; // párpado inferior
-  let aperturaOjo = ojoInf - ojoSup;
+  // Usamos el ancho de la cara (distancia entre mejillas)
+  let anchoCara = Math.abs(landmarks[234].x - landmarks[454].x);
+  if (anchoCara === 0) return;
 
-  if (aperturaOjo < 0.025 && !ojosCerrados) {
-    ojosCerrados = true; // detectamos cierre
-  } else if (aperturaOjo > 0.04 && ojosCerrados) {
-    ojosCerrados = false; // detectamos apertura -> parpadeo completo
+  // ===============================
+  // 👀 OJOS (promedio de ambos ojos)
+  // ===============================
+  let aperturaOjoIzq = (landmarks[145].y - landmarks[159].y) / anchoCara; // ojo izq
+  let aperturaOjoDer = (landmarks[374].y - landmarks[386].y) / anchoCara; // ojo der
+  let aperturaOjo = (aperturaOjoIzq + aperturaOjoDer) / 2;
+
+  if (aperturaOjo < 0.045 && !ojosCerrados && Date.now() - ultimoParpadeo > MIN_TIEMPO) {
+    ojosCerrados = true;
+    ultimoParpadeo = Date.now();
+  } else if (aperturaOjo > 0.065 && ojosCerrados) {
+    ojosCerrados = false;
     contadorOjos++;
     document.getElementById("contadorOjos").textContent = contadorOjos;
   }
 
   // ===============================
-  // 👄 BOCA
+  // 👄 BOCA (normalizada al ancho de cara)
   // ===============================
-  let bocaSup = landmarks[13].y;
-  let bocaInf = landmarks[14].y;
-  let aperturaBoca = bocaInf - bocaSup;
+  let aperturaBoca = (landmarks[14].y - landmarks[13].y) / anchoCara;
 
-  if (aperturaBoca > 0.06 && !bocaAbierta) {
-    bocaAbierta = true; // detectamos apertura
-  } else if (aperturaBoca < 0.03 && bocaAbierta) {
-    bocaAbierta = false; // detectamos cierre -> evento completo
+  if (aperturaBoca > 0.18 && !bocaAbierta && Date.now() - ultimoBoca > MIN_TIEMPO) {
+    bocaAbierta = true;
+    ultimoBoca = Date.now();
+  } else if (aperturaBoca < 0.10 && bocaAbierta) {
+    bocaAbierta = false;
     contadorBoca++;
     document.getElementById("contadorBoca").textContent = contadorBoca;
   }
 
   // ===============================
-  // 👁️ CEJAS
+  // 🤨 CEJAS (promedio izq + der)
   // ===============================
-  let ceja = landmarks[70].y;   // ceja izq
-  let ojo = landmarks[159].y;   // ojo izq
-  let distanciaCejaOjo = ojo - ceja;
+  let distanciaCejaOjoIzq = (landmarks[159].y - landmarks[70].y) / anchoCara;
+  let distanciaCejaOjoDer = (landmarks[386].y - landmarks[300].y) / anchoCara;
+  let distanciaCejaOjo = (distanciaCejaOjoIzq + distanciaCejaOjoDer) / 2;
 
-  if (distanciaCejaOjo > 0.09 && !cejasArriba) {
-    cejasArriba = true; // ceja levantada
-  } else if (distanciaCejaOjo < 0.06 && cejasArriba) {
-    cejasArriba = false; // ceja bajada -> evento completo
+  if (distanciaCejaOjo > 0.20 && !cejasArriba && Date.now() - ultimoCeja > MIN_TIEMPO) {
+    cejasArriba = true;
+    ultimoCeja = Date.now();
+  } else if (distanciaCejaOjo < 0.13 && cejasArriba) {
+    cejasArriba = false;
     contadorCejas++;
     document.getElementById("contadorCejas").textContent = contadorCejas;
   }
@@ -69,8 +82,8 @@ const faceMesh = new FaceMesh({
 faceMesh.setOptions({
   maxNumFaces: 1,
   refineLandmarks: true,
-  minDetectionConfidence: 0.6,
-  minTrackingConfidence: 0.6
+  minDetectionConfidence: 0.7, // más estricto
+  minTrackingConfidence: 0.7
 });
 
 faceMesh.onResults(results => {
@@ -96,3 +109,31 @@ const camera = new Camera(videoElement, {
   height: 480
 });
 camera.start();
+
+// ===============================
+// Guardar datos en API
+// ===============================
+document.getElementById("guardarDatos").addEventListener("click", () => {
+  let data = {
+    ojos: contadorOjos,
+    cejas: contadorCejas,
+    boca: contadorBoca
+  };
+
+  fetch("https://tu-api-o-endpoint.com/guardar", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  })
+    .then(res => {
+      if (!res.ok) throw new Error("Error en la respuesta del servidor");
+      return res.json();
+    })
+    .then(response => {
+      alert("✅ Datos guardados con éxito: " + JSON.stringify(response));
+    })
+    .catch(err => {
+      alert("❌ Error al guardar datos: " + err.message);
+      console.error("Error en fetch:", err);
+    });
+});
